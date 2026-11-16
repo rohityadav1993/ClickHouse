@@ -22,6 +22,7 @@ All tables use `ENGINE = MergeTree ORDER BY tuple()` and a text index with `toke
 | C | `s String` and `j JSON` (default `max_dynamic_paths`) | `JSONAllValues(j)` |
 | D | `s String` and `j JSON(max_dynamic_paths = 0)` | `JSONAllValues(j)` |
 | C0, D0 | Like C and D without `s` (size only) | `JSONAllValues(j)` |
+| E | `s String` | `JSONAllValues(CAST(s AS JSON(max_dynamic_paths = 0, SKIP REGEXP ...)))`, the expression that fills `vals` in B |
 
 ## Data sets and profiles
 
@@ -49,7 +50,7 @@ Each script takes `<profile> <data.native>` and prints a table to the standard o
 
 | Script | What it measures |
 |---|---|
-| `bench_functions.sh [runs=5]` | Wall time (median, min, max), peak memory and result of each expression over all rows: `JSONLength` (parse floor), the two new functions, `.2` of `JSONExtractLeafPathsAndValues`, and `JSONAllValues` of a `JSON` cast. The `generated` profile adds a nested `JSONExtractKeysAndValuesRaw` expression. The results of the cast and nested cases are not equal to the new functions, so compare their time only. |
+| `bench_functions.sh [runs=5]` | Wall time (median, min, max), peak memory and result of each expression over all rows: `JSONLength` (parse floor), the two new functions, `.2` of `JSONExtractLeafPathsAndValues`, the new functions without `skip_regex` and with `arrays = 'string'` and `'skip'`, and `JSONAllValues` of a `JSON` cast. Each round runs every case once. With `BINS`, each case runs on every binary in the same round. The `generated` profile adds a nested `JSONExtractKeysAndValuesRaw` expression. The results of the cast and nested cases are not equal to the new functions, so compare their time only. |
 | `bench_tables.sh` | Per table and build: insert time, `OPTIMIZE FINAL` time, bytes on disk, index bytes. Per token: granules read (`EXPLAIN indexes = 1`), cold time, warm median/min/max, time without the index, row count, `sum(cityHash64(s))` and `match`. `match` is `OK` when all runs and the run with `use_skip_indexes = 0` agree. The script stops on any other value. |
 | `bench_writeheavy.sh` | `NINS` inserts of `ROWS` rows into one table on a temporary server, then the wait for merges: total insert time, settle time, final and maximum number of active parts, bytes on disk. `CAPPED` in the last column means the wait hit `CAP`. |
 | `check.sh` | Cross-checks of the functions against each other and against `JSONAllValues`. The script fails if a value that must be 0 is not 0. |
@@ -71,8 +72,10 @@ For a quick test, use a small file (for example `generate.sh x.native 20000`) an
 |---|---|---|
 | `CH` | `clickhouse` | Binary |
 | `MAX_MEMORY` | `0` | `max_memory_usage` of the heavy queries, in bytes (0 is no limit) |
-| `TABLES` | `A B C D` | Table variants for `bench_tables.sh` and `bench_writeheavy.sh` |
-| `REPEATS` | `3` | Builds per table in `bench_tables.sh` |
+| `TABLES` | `A B C D` | Table variants for `bench_tables.sh` and `bench_writeheavy.sh`. Add `E` for the index on the cast expression. |
+| `REPEATS` | `3` | Builds per table in `bench_tables.sh`. Each repeat builds every table in `TABLES` once, in turn. |
+| `BINS` | `default=$CH` | `label=path` pairs for `bench_functions.sh`, to compare binaries in the same rounds |
+| `MAX_LOAD` | unset | `run_all.sh` starts a step only when the 1-minute load average is below this value |
 | `WARM` | `10` | Warm runs per token in `bench_tables.sh` |
 | `READ` | `1` | `0` skips the read side of `bench_tables.sh` |
 | `WORK` | `./work`, `./work_wh` | Scratch directory. Databases are deleted after each table. |

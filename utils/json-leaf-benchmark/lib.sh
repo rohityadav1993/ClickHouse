@@ -42,12 +42,23 @@ env_note()
     echo "# $(date -u +%Y-%m-%dT%H:%M:%SZ) $1 load_avg=$(cut -d' ' -f1-3 /proc/loadavg) cpus=$(getconf _NPROCESSORS_ONLN)"
 }
 
+# wait_quiet: if MAX_LOAD is set, waits until the 1-minute load average is below it and prints the wait.
+wait_quiet()
+{
+    [ -n "${MAX_LOAD:-}" ] || return 0
+    local start
+    start=$(date +%s)
+    while awk -v max="$MAX_LOAD" '{exit !($1 >= max)}' /proc/loadavg; do sleep 10; done
+    env_note "quiet after $(($(date +%s) - start)) s (MAX_LOAD=$MAX_LOAD)"
+}
+
 # Table variants:
 #   A  s String, text index on JSONExtractLeafValues(s, RE)
 #   B  s String and a stored Array(String) column filled with JSONAllValues of a JSON cast
 #   C  s String and a JSON column (default max_dynamic_paths), text index on JSONAllValues(j)
 #   D  s String and a JSON(max_dynamic_paths = 0) column, text index on JSONAllValues(j)
 #   C0, D0  like C and D without the column s (size only)
+#   E  s String only, text index on JSONAllValues of a JSON cast (the expression that fills the column of B)
 ddl()
 {
     case $1 in
@@ -57,6 +68,7 @@ ddl()
         D) echo "s String, j $JT_D, INDEX idx JSONAllValues(j) $IDX";;
         C0) echo "j $JT_C, INDEX idx JSONAllValues(j) $IDX";;
         D0) echo "j $JT_D, INDEX idx JSONAllValues(j) $IDX";;
+        E) echo "s String, INDEX idx $(expr E) $IDX";;
         *) echo "unknown table $1" >&2; return 1;;
     esac
 }
@@ -66,7 +78,7 @@ ins()
 {
     local src=$2
     case $1 in
-        A) echo "SELECT s FROM $src";;
+        A|E) echo "SELECT s FROM $src";;
         B) echo "SELECT s, JSONAllValues(CAST(s AS JSON(max_dynamic_paths = 0, SKIP REGEXP '$RE'))) FROM $src";;
         C) echo "SELECT s, CAST(s AS $JT_C) FROM $src";;
         D) echo "SELECT s, CAST(s AS $JT_D) FROM $src";;
@@ -83,6 +95,7 @@ expr()
         A) echo "JSONExtractLeafValues(s, '$RE')";;
         B) echo "vals";;
         C|D|C0|D0) echo "JSONAllValues(j)";;
+        E) echo "JSONAllValues(CAST(s AS JSON(max_dynamic_paths = 0, SKIP REGEXP '$RE')))";;
         *) echo "unknown table $1" >&2; return 1;;
     esac
 }
